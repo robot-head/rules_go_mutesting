@@ -280,8 +280,15 @@ git tag v0.1.0 && git push origin v0.1.0
 gh release create v0.1.0 --generate-notes
 ```
 
-The app computes the archive integrity hash and opens the pull request against
+The release workflow attaches a reproducible source archive, and the app
+computes its integrity hash and opens the pull request against
 [bazel-central-registry](https://github.com/bazelbuild/bazel-central-registry).
+
+The archive has to be a release asset rather than the tag tarball GitHub
+generates on demand: the registry rejects the latter, whose checksum is not
+guaranteed to stay stable. That is why the workflow builds one with `gzip -n`
+and `.bcr/source.template.json` points at
+`releases/download/{TAG}/{REPO}-{VERSION}.tar.gz`.
 
 To submit manually instead, add
 `modules/rules_go_mutesting/<version>/{MODULE.bazel,source.json}` and update
