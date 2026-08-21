@@ -142,27 +142,6 @@ def _runfile_entry(f, workspace):
         name = workspace + "/" + short_path
     return struct(path = f.path, name = name)
 
-def _package_dirs(files):
-    """The distinct directories a package's files sit in."""
-    return {paths.dirname(f.path): None for f in files}.keys()
-
-def _embed_name(f, dirs):
-    """Names an embedded file relative to its package directory.
-
-    A //go:embed pattern can reach into subdirectories, so staging embedded
-    files under their basename would flatten the tree and the pattern would
-    stop matching. Bazel files carry no package directory, so it is recovered
-    from the directories the package's Go sources sit in; an embedded file
-    generated into a different root falls back to its basename.
-    """
-    best = ""
-    for d in dirs:
-        if f.path.startswith(d + "/") and len(d) > len(best):
-            best = d
-    if not best:
-        return f.basename
-    return f.path[len(best) + 1:]
-
 def _package_sources(target, ctx, kind):
     """Returns (importpath, srcs, embedsrcs, dep_archives) for the target."""
     if kind == "go_test":
