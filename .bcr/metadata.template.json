@@ -1,14 +1,15 @@
 {
-    "homepage": "https://github.com/{OWNER}/{REPO}",
+    "homepage": "https://github.com/robot-head/rules_go_mutesting",
     "maintainers": [
         {
             "name": "Matthew Stone",
             "email": "matthew.d.stone@gmail.com",
-            "github": "robot-head"
+            "github": "robot-head",
+            "github_user_id": 877644
         }
     ],
     "repository": [
-        "github:{OWNER}/{REPO}"
+        "github:robot-head/rules_go_mutesting"
     ],
     "versions": [],
     "yanked_versions": {}
