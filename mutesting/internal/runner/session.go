@@ -58,7 +58,7 @@ func (s *session) runChangedLines(changed *ChangedLines) error {
 		return err
 	}
 	genArgs := append([]string{"--no-exec", "--do-not-remove-tmp-folder"},
-		s.settings.toolArgs(s.config, targets)...)
+		withoutScoring(s.settings.toolArgs(s.config, targets))...)
 	genLog, err := s.invokeIn(genArgs, s.staged.Root, "TMPDIR="+generated)
 	if err != nil {
 		return fmt.Errorf("generating mutations failed: %w\ncommand: %s %s\n%s",
@@ -111,6 +111,30 @@ func (s *session) runChangedLines(changed *ChangedLines) error {
 	header := fmt.Sprintf("Changed-lines mode: %d of %d mutations fall on changed lines.\n",
 		kept, len(mutants))
 	return s.finish(code, append([]byte(genLogHeader(genLog)+header), log...))
+}
+
+// scoringFlags gate the tool on the mutation score.
+var scoringFlags = []string{"--min-msi", "--min-covered-msi", "--fail-on-escaped"}
+
+// withoutScoring drops the flags that gate on the score. The generation pass
+// executes no tests, so its score is zero by construction and a threshold
+// would fail it -- "MSI 0.00% is below minimum required" -- before the run
+// that actually measures anything gets to start.
+func withoutScoring(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, a := range args {
+		gating := false
+		for _, f := range scoringFlags {
+			if a == f || strings.HasPrefix(a, f+"=") {
+				gating = true
+				break
+			}
+		}
+		if !gating {
+			out = append(out, a)
+		}
+	}
+	return out
 }
 
 func genLogHeader(genLog []byte) string {

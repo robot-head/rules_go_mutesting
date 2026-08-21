@@ -53,18 +53,13 @@ func stageModule(m *Manifest, root string) (*staged, error) {
 			continue
 		}
 		if nested, ok := nestedUnder(m.ImportPath, d.ImportPath); ok {
-			for _, s := range d.Srcs {
-				if err := st.place(s, nested); err != nil {
-					return nil, err
-				}
+			if err := st.placeAll(d, nested); err != nil {
+				return nil, err
 			}
 			continue
 		}
-		dir := filepath.Join("vendor", filepath.FromSlash(d.ImportPath))
-		for _, s := range d.Srcs {
-			if err := st.place(s, dir); err != nil {
-				return nil, err
-			}
+		if err := st.placeAll(d, filepath.Join("vendor", filepath.FromSlash(d.ImportPath))); err != nil {
+			return nil, err
 		}
 		vendored = append(vendored, d.ImportPath)
 	}
@@ -88,6 +83,17 @@ func nestedUnder(modulePath, dep string) (string, bool) {
 		return "", false
 	}
 	return filepath.FromSlash(strings.TrimPrefix(dep, modulePath+"/")), true
+}
+
+// placeAll stages a dependency's sources and its embedded files together, in
+// the directory the dependency occupies in the module.
+func (st *staged) placeAll(d Dep, dir string) error {
+	for _, s := range append(append([]Source{}, d.Srcs...), d.EmbedSrcs...) {
+		if err := st.place(s, dir); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (st *staged) place(s Source, dir string) error {

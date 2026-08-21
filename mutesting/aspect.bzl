@@ -75,17 +75,17 @@ def _single_file(target):
         return None
     return files[0]
 
-def _source_entry(f):
+def _source_entry(f, name = None):
     """Describes one file of the package under test."""
     return struct(
         path = f.path,
-        name = f.basename,
+        name = name or f.basename,
         # Only files that exist in the source tree can be matched against a
         # git diff; generated ones deliberately carry no workspace path.
         workspace = f.short_path if f.is_source else "",
     )
 
-def _dep_source_entry(f):
+def _dep_source_entry(f, name = None):
     """Describes one file of a dependency package.
 
     Dependency sources deliberately carry no workspace path. They are staged
@@ -94,10 +94,31 @@ def _dep_source_entry(f):
     copy of a dependency's source, duplicating mutants that belong to the
     target that actually owns that file.
     """
-    return struct(path = f.path, name = f.basename)
+    return struct(path = f.path, name = name or f.basename)
 
 def _go_files(files):
     return [f for f in files if f.extension == "go"]
+
+def _package_dirs(files):
+    """The distinct directories a package's files sit in."""
+    return {paths.dirname(f.path): None for f in files}.keys()
+
+def _embed_name(f, dirs):
+    """Names an embedded file relative to its package directory.
+
+    A //go:embed pattern can reach into subdirectories, so staging embedded
+    files under their basename would flatten the tree and the pattern would
+    stop matching. Bazel files carry no package directory, so it is recovered
+    from the directories the package's Go sources sit in; an embedded file
+    generated into a different root falls back to its basename.
+    """
+    best = ""
+    for d in dirs:
+        if f.path.startswith(d + "/") and len(d) > len(best):
+            best = d
+    if not best:
+        return f.basename
+    return f.path[len(best) + 1:]
 
 def _package_sources(target, ctx, kind):
     """Returns (importpath, srcs, embedsrcs, dep_archives) for the target."""
@@ -174,11 +195,22 @@ def _impl(target, ctx):
         dep_srcs = _go_files(list(data.srcs))
         if not dep_srcs:
             continue
+
+        # Files the dependency reaches through //go:embed. Staging its Go
+        # sources without them leaves the embed pattern matching nothing, and
+        # the staged module fails to build -- which mutation testing scores as
+        # a killed mutant, so every mutant would look killed.
+        dep_embedsrcs = list(getattr(data, "_embedsrcs", []))
+        dep_dirs = _package_dirs(dep_srcs)
         deps.append(struct(
             importpath = ip,
             srcs = [_dep_source_entry(f) for f in dep_srcs],
+            embedsrcs = [
+                _dep_source_entry(f, _embed_name(f, dep_dirs))
+                for f in dep_embedsrcs
+            ],
         ))
-        dep_inputs.extend(dep_srcs)
+        dep_inputs.extend(dep_srcs + dep_embedsrcs)
 
     go = ctx.toolchains[GO_TOOLCHAIN]
     sdk = go.sdk
@@ -206,7 +238,10 @@ def _impl(target, ctx):
         go_version = sdk.version,
         label = str(ctx.label),
         srcs = [_source_entry(f) for f in srcs],
-        embedsrcs = [_source_entry(f) for f in embedsrcs],
+        embedsrcs = [
+            _source_entry(f, _embed_name(f, _package_dirs(srcs)))
+            for f in embedsrcs
+        ],
         deps = deps,
         goroot = paths.dirname(sdk.root_file.path),
         has_cgo = _uses_cgo(target, ctx, kind, dep_datas),

@@ -73,7 +73,6 @@ func stableMutationKey(original, mutated []byte) (string, []int) {
 	if len(mLines) > n {
 		n = len(mLines)
 	}
-	var changed []int
 	for i := 0; i < n; i++ {
 		var o, m string
 		if i < len(oLines) {
@@ -84,10 +83,47 @@ func stableMutationKey(original, mutated []byte) (string, []int) {
 		}
 		if o != m {
 			fmt.Fprintf(h, "-%s\n+%s\n", o, m)
-			changed = append(changed, i+1)
 		}
 	}
-	return fmt.Sprintf("%x", h.Sum(nil)), changed
+	return fmt.Sprintf("%x", h.Sum(nil)), changedLines(oLines, mLines)
+}
+
+// changedLines reports the 1-based lines of the original that a mutation
+// rewrote.
+//
+// This cannot reuse the position-by-position comparison the checksum is built
+// from: a mutator that adds or drops a line shifts everything after it, so
+// that comparison would call the entire remainder of the file changed and pull
+// unrelated mutations into a changed-lines run. Each mutant rewrites a single
+// region, so trimming the common prefix and suffix isolates it.
+func changedLines(oLines, mLines []string) []int {
+	pre := 0
+	for pre < len(oLines) && pre < len(mLines) && oLines[pre] == mLines[pre] {
+		pre++
+	}
+	if pre == len(oLines) && pre == len(mLines) {
+		return nil
+	}
+	suf := 0
+	for suf < len(oLines)-pre && suf < len(mLines)-pre &&
+		oLines[len(oLines)-1-suf] == mLines[len(mLines)-1-suf] {
+		suf++
+	}
+
+	first, last := pre+1, len(oLines)-suf
+	if first > last {
+		// The mutant only inserted lines, so no original line was rewritten.
+		// Attribute it to the line the insertion sits against.
+		if first > len(oLines) {
+			first = len(oLines)
+		}
+		last = first
+	}
+	var changed []int
+	for ln := first; ln <= last; ln++ {
+		changed = append(changed, ln)
+	}
+	return changed
 }
 
 // collectMutants walks the scratch directory left behind by a generate-only
