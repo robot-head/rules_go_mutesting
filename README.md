@@ -268,17 +268,19 @@ cd e2e/bcr_test && bazel test //... --override_module=rules_go_mutesting=../..
 
 The module is set up for the
 [Publish to BCR](https://github.com/bazel-contrib/publish-to-bcr) app, which
-opens the registry pull request from a GitHub release. Before the first
-release:
-
-1. Fill in the `github` field in `.bcr/metadata.template.json` with the
-   maintainer's GitHub username. The other placeholders (`{OWNER}`, `{REPO}`,
-   `{VERSION}`, `{TAG}`) are substituted automatically.
-2. Install the Publish to BCR app on the repository.
+opens the registry pull request from a GitHub release. Install the app on this
+repository once; the placeholders in `.bcr/` (`{OWNER}`, `{REPO}`,
+`{VERSION}`, `{TAG}`) are substituted automatically.
 
 Then, for each release, set `version` in `MODULE.bazel` to match and publish a
-GitHub release whose tag is that version. The app computes the archive
-integrity hash and opens the pull request against
+GitHub release whose tag is that version:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+gh release create v0.1.0 --generate-notes
+```
+
+The app computes the archive integrity hash and opens the pull request against
 [bazel-central-registry](https://github.com/bazelbuild/bazel-central-registry).
 
 To submit manually instead, add
