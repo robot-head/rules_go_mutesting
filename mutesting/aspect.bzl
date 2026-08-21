@@ -96,8 +96,16 @@ def _dep_source_entry(f, name = None):
     """
     return struct(path = f.path, name = name or f.basename)
 
-def _go_files(files):
-    return [f for f in files if f.extension == "go"]
+# Extensions the staged module needs. Assembly is compiled even with cgo
+# disabled, and a package that implements a function in assembly declares the
+# Go side of it with no body, so dropping the .s file turns into "missing
+# function body" at compile time. Headers come along for the assembly to
+# include. C sources deliberately do not: the go command rejects them outright
+# when cgo is off.
+_STAGED_EXTENSIONS = ["go", "s", "S", "h"]
+
+def _staged_files(files):
+    return [f for f in files if f.extension in _STAGED_EXTENSIONS]
 
 def _package_dirs(files):
     """The distinct directories a package's files sit in."""
@@ -120,12 +128,26 @@ def _embed_name(f, dirs):
         return f.basename
     return f.path[len(best) + 1:]
 
+def _runfile_entry(f, workspace):
+    """Describes one runfile by its path inside the runfiles tree.
+
+    Bazel spells a file from an external repository as ../<repo>/<path>
+    relative to the main workspace directory, which is one level below the
+    runfiles root; everything else is relative to the main workspace itself.
+    """
+    short_path = f.short_path
+    if short_path.startswith("../"):
+        name = short_path[len("../"):]
+    else:
+        name = workspace + "/" + short_path
+    return struct(path = f.path, name = name)
+
 def _package_sources(target, ctx, kind):
     """Returns (importpath, srcs, embedsrcs, dep_archives) for the target."""
     if kind == "go_test":
         # A go_test carries the test sources; the package under test comes
         # from the libraries it embeds.
-        srcs = list(_go_files(ctx.rule.files.srcs))
+        srcs = list(_staged_files(ctx.rule.files.srcs))
         embedsrcs = []
         importpath = getattr(ctx.rule.attr, "importpath", "")
         dep_archives = []
@@ -133,7 +155,7 @@ def _package_sources(target, ctx, kind):
             if GoInfo not in e:
                 continue
             info = e[GoInfo]
-            srcs.extend(_go_files(info.srcs))
+            srcs.extend(_staged_files(info.srcs))
             embedsrcs.extend(info.embedsrcs)
             if not importpath:
                 importpath = info.importpath
@@ -151,21 +173,50 @@ def _package_sources(target, ctx, kind):
             dep_archives.append(d[GoArchive])
     return (
         info.importpath,
-        _go_files(info.srcs),
+        _staged_files(info.srcs),
         list(info.embedsrcs),
         dep_archives,
     )
 
-def _uses_cgo(target, ctx, kind, dep_datas):
+def _x_defs(target, ctx, importpath):
+    """Collects the target's -X linker values, keyed by qualified symbol.
+
+    A test that reads a variable stamped in by x_defs -- the path of a fixture
+    it is given through data, most often -- sees an empty string without them,
+    so the staged module has to stamp the same values. Values are expanded the
+    way rules_go expands them, which is what turns $(rlocationpath ...) into a
+    path that resolves inside the staged runfiles tree.
+    """
+    x_defs = {}
+    for e in getattr(ctx.rule.attr, "embed", []):
+        if GoInfo in e:
+            x_defs.update(e[GoInfo].x_defs)
+    if GoInfo in target:
+        x_defs.update(target[GoInfo].x_defs)
+    for k, v in getattr(ctx.rule.attr, "x_defs", {}).items():
+        if "$" in v:
+            v = ctx.expand_location(v, getattr(ctx.rule.attr, "data", []))
+        if "." not in k:
+            k = importpath + "." + k
+        x_defs[k] = v
+    return x_defs
+
+def _uses_cgo(target, ctx, kind):
+    """Reports whether the package under test itself needs cgo.
+
+    Only the package being mutated is checked. A dependency marked cgo = True
+    is usually still buildable with cgo off -- the C path is one build-tagged
+    implementation among several, as it is for golang.org/x/sys/unix -- and
+    skipping on that basis would drop most of a real repository. A dependency
+    that genuinely cannot build without a C toolchain is caught instead by the
+    compile check the runner makes before it mutates anything.
+    """
     if getattr(ctx.rule.attr, "cgo", False):
         return True
     if kind != "go_test" and GoInfo in target and target[GoInfo].cgo:
         return True
     for e in getattr(ctx.rule.attr, "embed", []):
         if GoInfo in e and e[GoInfo].cgo:
-            return True
-    for data in dep_datas:
-        if getattr(data, "_cgo", False):
             return True
     return False
 
@@ -192,7 +243,7 @@ def _impl(target, ctx):
         if not ip or ip == importpath or ip == importpath + "_test":
             # The package under test is staged from its own sources.
             continue
-        dep_srcs = _go_files(list(data.srcs))
+        dep_srcs = _staged_files(list(data.srcs))
         if not dep_srcs:
             continue
 
@@ -211,6 +262,15 @@ def _impl(target, ctx):
             ],
         ))
         dep_inputs.extend(dep_srcs + dep_embedsrcs)
+
+    # Data dependencies. A test that reads one looks it up through the
+    # runfiles libraries, so the tree has to be rebuilt around the staged
+    # module or every mutant dies on a missing file.
+    runfiles = target[DefaultInfo].default_runfiles
+    runfiles_inputs = runfiles.files.to_list()
+    repo_mapping = getattr(runfiles, "repo_mapping_manifest", None)
+    if repo_mapping:
+        runfiles_inputs.append(repo_mapping)
 
     go = ctx.toolchains[GO_TOOLCHAIN]
     sdk = go.sdk
@@ -244,7 +304,13 @@ def _impl(target, ctx):
         ],
         deps = deps,
         goroot = paths.dirname(sdk.root_file.path),
-        has_cgo = _uses_cgo(target, ctx, kind, dep_datas),
+        has_cgo = _uses_cgo(target, ctx, kind),
+        runfiles = [
+            _runfile_entry(f, ctx.workspace_name)
+            for f in runfiles.files.to_list()
+        ],
+        repo_mapping = repo_mapping.path if repo_mapping else "",
+        x_defs = _x_defs(target, ctx, importpath),
     )))
 
     settings_file = ctx.actions.declare_file(name + ".mutesting-settings.json")
@@ -265,7 +331,7 @@ def _impl(target, ctx):
         executable = ctx.executable._runner,
         arguments = [args],
         inputs = depset(
-            srcs + embedsrcs + dep_inputs + setting_inputs + [manifest, settings_file],
+            srcs + embedsrcs + dep_inputs + runfiles_inputs + setting_inputs + [manifest, settings_file],
             transitive = [sdk.srcs, sdk.libs, sdk.headers, sdk.tools, depset([sdk.go, sdk.root_file])],
         ),
         tools = [ctx.executable._tool],

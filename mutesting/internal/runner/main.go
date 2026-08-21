@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -83,7 +84,7 @@ func run(manifestPath, settingsPath, toolPath string, out outputs) error {
 	}
 
 	if m.HasCgo {
-		// Mutating cgo packages would need the staged module to reproduce the
+		// Mutating a cgo package would need the staged module to reproduce the
 		// C toolchain setup rules_go arranges; report the skip rather than
 		// failing a repo-wide sweep.
 		return writeSkipped(out, m, "package uses cgo, which mutation testing does not support")
@@ -109,6 +110,10 @@ func run(manifestPath, settingsPath, toolPath string, out outputs) error {
 	env, err := buildEnv(m, scratch)
 	if err != nil {
 		return err
+	}
+
+	if reason := compileStaged(m, env, st.Root); reason != "" {
+		return writeSkipped(out, m, reason)
 	}
 
 	configPath := filepath.Join(scratch, "config.yaml")
@@ -178,6 +183,27 @@ func mutationTargets(s *Settings, st *staged) ([]string, error) {
 // which is a successful no-op rather than a failure.
 var errNoMatchingFiles = fmt.Errorf("no requested file belongs to this target")
 
+// compileStaged builds the package's test binary in the staged module,
+// returning the reason to skip the run when it does not build.
+//
+// Mutation testing counts a mutant that fails to compile as killed, on the
+// grounds that the compiler caught it. A staged module that does not compile
+// at all therefore reports every mutant killed and a flawless score, which is
+// the worst possible failure mode for a tool whose whole output is a number.
+// One compile up front turns that into a reported skip: a dependency needing
+// a C toolchain the sandbox does not have, a source file the aspect failed to
+// stage, or tests that no longer build all land here.
+func compileStaged(m *Manifest, env []string, root string) string {
+	cmd := exec.Command(filepath.Join(m.GoRoot, "bin", "go"), "test", "-c", "-o", os.DevNull, ".")
+	cmd.Dir = root
+	cmd.Env = env
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return ""
+	}
+	return fmt.Sprintf("the staged module does not compile:\n%s", out)
+}
+
 func writeSkipped(out outputs, m *Manifest, reason string) error {
 	msg := fmt.Sprintf("%s: skipped: %s\n", m.Label, reason)
 	if out.log != "" {
@@ -229,6 +255,26 @@ func writeEmptyReport(path, reason string) error {
 	return os.WriteFile(path, []byte(body), 0o644)
 }
 
+// goflagsXDefs renders x_defs as a GOFLAGS fragment, empty when there are
+// none. GOFLAGS rather than a tool option because every go command the engine
+// runs has to link the same values, and the go command splits GOFLAGS with
+// shell-like quoting, which is what lets one -ldflags carry several -X.
+//
+// A value containing a quote or a newline is dropped: it cannot survive that
+// splitting, and no rules_go target stamps one today.
+func goflagsXDefs(xDefs map[string]string) string {
+	var defs []string
+	for _, k := range sortedKeys(xDefs) {
+		if v := xDefs[k]; !strings.ContainsAny(v, "'\"\n") {
+			defs = append(defs, fmt.Sprintf("-X %s=%s", k, v))
+		}
+	}
+	if len(defs) == 0 {
+		return ""
+	}
+	return " '-ldflags=" + strings.Join(defs, " ") + "'"
+}
+
 // buildEnv assembles the environment for the mutation engine. The engine
 // shells out to the go command, so the staged module has to look like an
 // ordinary module with no network available.
@@ -251,7 +297,12 @@ func buildEnv(m *Manifest, scratch string) ([]string, error) {
 	// on PATH alongside the SDK.
 	path := strings.Join([]string{filepath.Join(goroot, "bin"), "/usr/bin", "/bin"}, string(os.PathListSeparator))
 
-	return []string{
+	runfiles, err := stageRunfiles(m, filepath.Join(scratch, "runfiles"))
+	if err != nil {
+		return nil, fmt.Errorf("staging runfiles: %w", err)
+	}
+
+	env := []string{
 		"GOROOT=" + goroot,
 		"HOME=" + home,
 		"GOPATH=" + gopath,
@@ -259,11 +310,15 @@ func buildEnv(m *Manifest, scratch string) ([]string, error) {
 		"GOTMPDIR=" + gotmp,
 		"TMPDIR=" + gotmp,
 		"PATH=" + path,
-		"GOFLAGS=-mod=vendor",
+		"GOFLAGS=-mod=vendor" + goflagsXDefs(m.XDefs),
 		"GOPROXY=off",
 		"GO111MODULE=on",
 		"CGO_ENABLED=0",
 		"GOTOOLCHAIN=local",
 		"GOWORK=off",
-	}, nil
+	}
+	if runfiles != "" {
+		env = append(env, "RUNFILES_DIR="+runfiles)
+	}
+	return env, nil
 }

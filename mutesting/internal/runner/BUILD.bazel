@@ -7,6 +7,7 @@ go_library(
         "manifest.go",
         "mutants.go",
         "options.go",
+        "runfiles.go",
         "session.go",
         "stage.go",
     ],
@@ -26,7 +27,9 @@ go_test(
     srcs = [
         "mutants_test.go",
         "options_test.go",
+        "runfiles_test.go",
         "stage_test.go",
     ],
     embed = [":runner_lib"],
+    deps = ["@in_gopkg_yaml_v3//:yaml_v3"],
 )

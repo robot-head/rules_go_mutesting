@@ -19,5 +19,5 @@ go_mutesting_test(
 # should be.
 go_mutesting_test(
     name = "adder_report_only_test",
-    target = "//examples/adder:adder",
+    target = "//examples/adder",
 )

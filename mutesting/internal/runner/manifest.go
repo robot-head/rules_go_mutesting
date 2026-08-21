@@ -27,6 +27,14 @@ type Manifest struct {
 	HasCgo bool `json:"has_cgo"`
 	// Label of the target, for diagnostics.
 	Label string `json:"label"`
+	// Runfiles are the target's data dependencies. Name is the runfiles-root
+	// relative path, so a test that looks a file up through Rlocation finds it.
+	Runfiles []Source `json:"runfiles"`
+	// RepoMapping is Bazel's _repo_mapping file, which the runfiles libraries
+	// need to turn an apparent repository name into a canonical one.
+	RepoMapping string `json:"repo_mapping"`
+	// XDefs are the target's x_defs, as qualified symbol to value.
+	XDefs map[string]string `json:"x_defs"`
 }
 
 // Source is one input file: where Bazel put it, and where it belongs in the
@@ -93,6 +101,10 @@ func (m *Manifest) absolutize(root string) error {
 			m.Deps[i].EmbedSrcs[j].Path = abs(m.Deps[i].EmbedSrcs[j].Path)
 		}
 	}
+	for i := range m.Runfiles {
+		m.Runfiles[i].Path = abs(m.Runfiles[i].Path)
+	}
+	m.RepoMapping = abs(m.RepoMapping)
 	m.GoRoot = abs(m.GoRoot)
 	return nil
 }
