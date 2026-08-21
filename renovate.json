@@ -1,0 +1,70 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": [
+    "before 6am on monday"
+  ],
+  "prConcurrentLimit": 3,
+  "postUpdateOptions": [
+    "gomodTidy"
+  ],
+  "packageRules": [
+    {
+      "description": "One pull request for the Bazel module dependencies, which appear in both MODULE.bazel files.",
+      "matchManagers": [
+        "bazel-module"
+      ],
+      "groupName": "Bazel module dependencies"
+    },
+    {
+      "description": "e2e/bcr_test depends on this module by name so that it exercises the published artifact. That version tracks releases of this repository, not an upstream dependency.",
+      "matchManagers": [
+        "bazel-module"
+      ],
+      "matchPackageNames": [
+        "rules_go_mutesting"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The mutation engine drives every aspect action, and the runner reimplements its mutation key, so upgrades need the test suite to vouch for them.",
+      "matchManagers": [
+        "gomod"
+      ],
+      "matchPackageNames": [
+        "github.com/jonbaldie/go-mutesting/v2"
+      ],
+      "groupName": "go-mutesting",
+      "automerge": false
+    },
+    {
+      "description": "Workflow actions are low risk and verified by the same CI that gates everything else.",
+      "matchManagers": [
+        "github-actions"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest"
+      ],
+      "groupName": "GitHub Actions",
+      "automerge": true
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "Keep .bazelversion current; Renovate has no built-in manager for it.",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.bazelversion$/"
+      ],
+      "matchStrings": [
+        "^(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*$"
+      ],
+      "depNameTemplate": "bazelbuild/bazel",
+      "datasourceTemplate": "github-releases"
+    }
+  ]
+}
