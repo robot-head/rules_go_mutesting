@@ -108,8 +108,13 @@ def _staged_files(files):
     return [f for f in files if f.extension in _STAGED_EXTENSIONS]
 
 def _package_dirs(files):
-    """The distinct directories a package's files sit in."""
-    return {paths.dirname(f.path): None for f in files}.keys()
+    """The distinct directories a package's files sit in.
+
+    Workspace-relative, because a generated file and a source file of the same
+    package share a short path but not an exec path: one is under bazel-out and
+    the other is not.
+    """
+    return {paths.dirname(f.short_path): None for f in files}.keys()
 
 def _embed_name(f, dirs):
     """Names an embedded file relative to its package directory.
@@ -118,15 +123,15 @@ def _embed_name(f, dirs):
     files under their basename would flatten the tree and the pattern would
     stop matching. Bazel files carry no package directory, so it is recovered
     from the directories the package's Go sources sit in; an embedded file
-    generated into a different root falls back to its basename.
+    that sits in no such directory falls back to its basename.
     """
     best = ""
     for d in dirs:
-        if f.path.startswith(d + "/") and len(d) > len(best):
+        if f.short_path.startswith(d + "/") and len(d) > len(best):
             best = d
     if not best:
         return f.basename
-    return f.path[len(best) + 1:]
+    return f.short_path[len(best) + 1:]
 
 def _runfile_entry(f, workspace):
     """Describes one runfile by its path inside the runfiles tree.
@@ -141,6 +146,28 @@ def _runfile_entry(f, workspace):
     else:
         name = workspace + "/" + short_path
     return struct(path = f.path, name = name)
+
+def _runfile_entries(runfiles, workspace):
+    """Describes every runfile of a target, including its declared symlinks.
+
+    A symlink declares a runfiles path of its own, and that path is what the
+    test asks Rlocation for. Staging the underlying file alone leaves the name
+    the test uses missing, so the test fails for every mutant and the run
+    reports a perfect score.
+    """
+    entries = [_runfile_entry(f, workspace) for f in runfiles.files.to_list()]
+    for e in runfiles.symlinks.to_list():
+        entries.append(struct(path = e.target_file.path, name = workspace + "/" + e.path))
+    for e in runfiles.root_symlinks.to_list():
+        entries.append(struct(path = e.target_file.path, name = e.path))
+    return entries
+
+def _symlink_files(runfiles):
+    """The files behind a target's declared runfiles symlinks."""
+    return [
+        e.target_file
+        for e in runfiles.symlinks.to_list() + runfiles.root_symlinks.to_list()
+    ]
 
 def _package_sources(target, ctx, kind):
     """Returns (importpath, srcs, embedsrcs, dep_archives) for the target."""
@@ -267,7 +294,7 @@ def _impl(target, ctx):
     # runfiles libraries, so the tree has to be rebuilt around the staged
     # module or every mutant dies on a missing file.
     runfiles = target[DefaultInfo].default_runfiles
-    runfiles_inputs = runfiles.files.to_list()
+    runfiles_inputs = runfiles.files.to_list() + _symlink_files(runfiles)
     repo_mapping = getattr(runfiles, "repo_mapping_manifest", None)
     if repo_mapping:
         runfiles_inputs.append(repo_mapping)
@@ -305,10 +332,7 @@ def _impl(target, ctx):
         deps = deps,
         goroot = paths.dirname(sdk.root_file.path),
         has_cgo = _uses_cgo(target, ctx, kind),
-        runfiles = [
-            _runfile_entry(f, ctx.workspace_name)
-            for f in runfiles.files.to_list()
-        ],
+        runfiles = _runfile_entries(runfiles, ctx.workspace_name),
         repo_mapping = repo_mapping.path if repo_mapping else "",
         x_defs = _x_defs(target, ctx, importpath),
     )))

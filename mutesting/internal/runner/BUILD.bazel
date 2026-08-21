@@ -29,6 +29,7 @@ go_test(
         "options_test.go",
         "runfiles_test.go",
         "stage_test.go",
+        "xdefs_test.go",
     ],
     embed = [":runner_lib"],
     deps = ["@in_gopkg_yaml_v3//:yaml_v3"],

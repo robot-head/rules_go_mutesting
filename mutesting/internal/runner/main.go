@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -83,6 +84,15 @@ func run(manifestPath, settingsPath, toolPath string, out outputs) error {
 		}
 	}
 
+	if k, v, ok := stampedXDef(m.XDefs); ok {
+		// rules_go substitutes workspace status values at link time; the
+		// staged module has no status file to substitute from, so the test
+		// would read a placeholder where the Bazel-built one reads a commit
+		// hash. That fails for every mutant, which scores as a perfect run.
+		return writeSkipped(out, m, fmt.Sprintf(
+			"x_defs value %s=%s needs a workspace status value, which mutation testing cannot reproduce", k, v))
+	}
+
 	if m.HasCgo {
 		// Mutating a cgo package would need the staged module to reproduce the
 		// C toolchain setup rules_go arranges; report the skip rather than
@@ -112,7 +122,7 @@ func run(manifestPath, settingsPath, toolPath string, out outputs) error {
 		return err
 	}
 
-	if reason := compileStaged(m, env, st.Root); reason != "" {
+	if reason := compileStaged(m, settings, env, st.Root); reason != "" {
 		return writeSkipped(out, m, reason)
 	}
 
@@ -193,8 +203,13 @@ var errNoMatchingFiles = fmt.Errorf("no requested file belongs to this target")
 // One compile up front turns that into a reported skip: a dependency needing
 // a C toolchain the sandbox does not have, a source file the aspect failed to
 // stage, or tests that no longer build all land here.
-func compileStaged(m *Manifest, env []string, root string) string {
-	cmd := exec.Command(filepath.Join(m.GoRoot, "bin", "go"), "test", "-c", "-o", os.DevNull, ".")
+//
+// The engine's own go test invocations carry the test_flags setting, so the
+// check has to as well: a build tag there decides which files the package even
+// has, and compiling without it turns a working target into a reported skip.
+func compileStaged(m *Manifest, s *Settings, env []string, root string) string {
+	args := append([]string{"test", "-c", "-o", os.DevNull}, strings.Fields(s.Strings["test_flags"])...)
+	cmd := exec.Command(filepath.Join(m.GoRoot, "bin", "go"), append(args, ".")...)
 	cmd.Dir = root
 	cmd.Env = env
 	out, err := cmd.CombinedOutput()
@@ -261,18 +276,38 @@ func writeEmptyReport(path, reason string) error {
 // shell-like quoting, which is what lets one -ldflags carry several -X.
 //
 // A value containing a quote or a newline is dropped: it cannot survive that
-// splitting, and no rules_go target stamps one today.
+// splitting, and no rules_go target stamps one today. Everything else is
+// double quoted, because -ldflags is split the same way and an unquoted space
+// would end the -X definition at the first word of the value.
 func goflagsXDefs(xDefs map[string]string) string {
 	var defs []string
 	for _, k := range sortedKeys(xDefs) {
 		if v := xDefs[k]; !strings.ContainsAny(v, "'\"\n") {
-			defs = append(defs, fmt.Sprintf("-X %s=%s", k, v))
+			// Quoted by hand: the go command's splitter strips quotes
+			// without interpreting escapes, so %q's escaping would end up
+			// in the value.
+			defs = append(defs, `-X "`+k+"="+v+`"`)
 		}
 	}
 	if len(defs) == 0 {
 		return ""
 	}
 	return " '-ldflags=" + strings.Join(defs, " ") + "'"
+}
+
+// stampStatusVar matches a workspace status placeholder, the {KEY} form
+// rules_go replaces from stable-status.txt and volatile-status.txt.
+var stampStatusVar = regexp.MustCompile(`\{[A-Za-z_][A-Za-z0-9_]*\}`)
+
+// stampedXDef returns the first x_def whose value still names a workspace
+// status variable.
+func stampedXDef(xDefs map[string]string) (string, string, bool) {
+	for _, k := range sortedKeys(xDefs) {
+		if stampStatusVar.MatchString(xDefs[k]) {
+			return k, xDefs[k], true
+		}
+	}
+	return "", "", false
 }
 
 // buildEnv assembles the environment for the mutation engine. The engine
