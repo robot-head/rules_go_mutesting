@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,6 +68,49 @@ func TestStableMutationKeyIgnoresLocation(t *testing.T) {
 	keyB, _ := stableMutationKey([]byte(b), []byte(replaceLine(b, 6, "\treturn 1 - 2")))
 	if keyA != keyB {
 		t.Errorf("same mutation at different lines produced %s and %s", keyA, keyB)
+	}
+}
+
+func TestChangedLinesIsolatesShiftingMutations(t *testing.T) {
+	// A mutator that removes or adds a line shifts every line below it. Only
+	// the region it rewrote is changed; reporting the shifted remainder too
+	// would sweep unrelated mutations into a changed-lines run.
+	lines := splitLines(originalFixture)
+	cases := []struct {
+		name    string
+		mutated string
+		want    []int
+	}{
+		{
+			name:    "replacement",
+			mutated: replaceLine(originalFixture, 4, "\treturn a - b"),
+			want:    []int{4},
+		},
+		{
+			name:    "removed line",
+			mutated: joinLines(append(append([]string{}, lines[:8]...), lines[9:]...)),
+			want:    []int{9},
+		},
+		{
+			name: "added line",
+			mutated: joinLines(append(append(append([]string{}, lines[:8]...),
+				"\t\tpanic(\"\")"), lines[8:]...)),
+			want: []int{9},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, got := stableMutationKey([]byte(originalFixture), []byte(tc.mutated))
+			if fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("changed lines = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestChangedLinesOnIdenticalFiles(t *testing.T) {
+	if _, got := stableMutationKey([]byte(originalFixture), []byte(originalFixture)); got != nil {
+		t.Errorf("changed lines = %v, want none", got)
 	}
 }
 

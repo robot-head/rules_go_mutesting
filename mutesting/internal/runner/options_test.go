@@ -9,6 +9,19 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestWithoutScoringDropsThresholdFlags(t *testing.T) {
+	// The generation pass runs no tests, so a threshold it can never meet
+	// would fail the build before any mutant is executed.
+	args := []string{
+		"--fail-on-escaped", "--verbose", "--min-msi=80",
+		"--min-covered-msi=90", "--config=/tmp/c.yaml", "./a.go",
+	}
+	got := strings.Join(withoutScoring(args), " ")
+	if want := "--verbose --config=/tmp/c.yaml ./a.go"; got != want {
+		t.Errorf("withoutScoring = %q, want %q", got, want)
+	}
+}
+
 func TestToolArgsMapsEverySettingKind(t *testing.T) {
 	s := &Settings{
 		Bools:   map[string]bool{"verbose": true, "coverage": true, "quiet": false},

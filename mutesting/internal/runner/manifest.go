@@ -45,6 +45,10 @@ type Source struct {
 type Dep struct {
 	ImportPath string   `json:"importpath"`
 	Srcs       []Source `json:"srcs"`
+	// EmbedSrcs are non-Go files the dependency references with //go:embed.
+	// The package under test does not read them, but the go command refuses to
+	// build a package whose embed pattern matches nothing.
+	EmbedSrcs []Source `json:"embedsrcs"`
 }
 
 func loadManifest(path string) (*Manifest, error) {
@@ -84,6 +88,9 @@ func (m *Manifest) absolutize(root string) error {
 	for i := range m.Deps {
 		for j := range m.Deps[i].Srcs {
 			m.Deps[i].Srcs[j].Path = abs(m.Deps[i].Srcs[j].Path)
+		}
+		for j := range m.Deps[i].EmbedSrcs {
+			m.Deps[i].EmbedSrcs[j].Path = abs(m.Deps[i].EmbedSrcs[j].Path)
 		}
 	}
 	m.GoRoot = abs(m.GoRoot)

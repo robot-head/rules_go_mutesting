@@ -39,6 +39,17 @@ func TestStageModuleLayout(t *testing.T) {
 				ImportPath: "example.com/app/internal/util",
 				Srcs:       []Source{{Path: writeSource(t, in, "util.go", "package util\n"), Name: "util.go"}},
 			},
+			{
+				// A dependency whose //go:embed pattern does not match fails
+				// to compile, which mutation testing would score as a killed
+				// mutant, so its embedded files have to be staged too.
+				ImportPath: "example.com/embedder",
+				Srcs:       []Source{{Path: writeSource(t, in, "embedder.go", "package embedder\n"), Name: "embedder.go"}},
+				EmbedSrcs: []Source{
+					{Path: writeSource(t, in, "defaults.binpb", "\x00"), Name: "defaults.binpb"},
+					{Path: writeSource(t, in, "tmpl/page.html", "<p>"), Name: "tmpl/page.html"},
+				},
+			},
 		},
 	}
 
@@ -53,6 +64,10 @@ func TestStageModuleLayout(t *testing.T) {
 		"app_test.go",
 		"internal/util/util.go",
 		"vendor/example.com/other/other.go",
+		"vendor/example.com/embedder/defaults.binpb",
+		// An embed pattern can name a subdirectory, so the layout under the
+		// package has to survive staging.
+		"vendor/example.com/embedder/tmpl/page.html",
 		"go.mod",
 		"vendor/modules.txt",
 	} {
@@ -78,7 +93,8 @@ func TestStageModuleLayout(t *testing.T) {
 	// The go command rejects a vendor directory whose modules.txt disagrees
 	// with go.mod, so every requirement needs a matching explicit entry.
 	modules := readFile(t, filepath.Join(root, "vendor/modules.txt"))
-	want := "# example.com/other v0.0.0\n## explicit; go 1.26\nexample.com/other\n"
+	want := "# example.com/embedder v0.0.0\n## explicit; go 1.26\nexample.com/embedder\n" +
+		"# example.com/other v0.0.0\n## explicit; go 1.26\nexample.com/other\n"
 	if modules != want {
 		t.Errorf("modules.txt = %q, want %q", modules, want)
 	}
