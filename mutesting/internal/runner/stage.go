@@ -47,7 +47,8 @@ func stageModule(m *Manifest, root string) (*staged, error) {
 		}
 	}
 
-	var vendored []string
+	// Vendored packages, grouped by the synthetic module that owns them.
+	vendored := map[string][]string{}
 	for _, d := range m.Deps {
 		if d.ImportPath == "" || d.ImportPath == m.ImportPath {
 			continue
@@ -61,9 +62,12 @@ func stageModule(m *Manifest, root string) (*staged, error) {
 		if err := st.placeAll(d, filepath.Join("vendor", filepath.FromSlash(d.ImportPath))); err != nil {
 			return nil, err
 		}
-		vendored = append(vendored, d.ImportPath)
+		mod := moduleFor(d.ImportPath)
+		vendored[mod] = append(vendored[mod], d.ImportPath)
 	}
-	sort.Strings(vendored)
+	for _, pkgs := range vendored {
+		sort.Strings(pkgs)
+	}
 
 	if err := st.writeGoMod(m, vendored); err != nil {
 		return nil, err
@@ -74,6 +78,33 @@ func stageModule(m *Manifest, root string) (*staged, error) {
 		}
 	}
 	return st, nil
+}
+
+// moduleFor returns the synthetic module path that owns an import path.
+//
+// A path element that looks like a major version but is not a legal one makes
+// the whole module path invalid: the go command rejects both
+// "go.opentelemetry.io/proto/otlp/common/v1" (v0 and v1 are never written as
+// suffixes) and "go.opentelemetry.io/otel/semconv/v1.27.0" (a full version is
+// not a major suffix at all). Packages do live in directories named that way,
+// so attribute them to their parent, which is a legal module path, and list
+// them under it in modules.txt. Every other path is its own module, one
+// synthetic module per package being the only grouping the aspect's flat
+// dependency list supports.
+func moduleFor(importPath string) string {
+	i := strings.LastIndex(importPath, "/")
+	if i < 0 {
+		return importPath
+	}
+	last := importPath[i+1:]
+	if len(last) < 2 || last[0] != 'v' || last[1] < '0' || last[1] > '9' {
+		return importPath
+	}
+	if major := last[1:]; allDigits(major) && major != "0" && major != "1" {
+		// v2 and up: a legal major version suffix, and its own module.
+		return importPath
+	}
+	return importPath[:i]
 }
 
 // nestedUnder reports whether dep lives beneath the main module path, and if
@@ -135,13 +166,13 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-func (st *staged) writeGoMod(m *Manifest, vendored []string) error {
+func (st *staged) writeGoMod(m *Manifest, vendored map[string][]string) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "module %s\n\ngo %s\n", m.ImportPath, m.GoVersion)
 	if len(vendored) > 0 {
 		b.WriteString("\nrequire (\n")
-		for _, ip := range vendored {
-			fmt.Fprintf(&b, "\t%s %s\n", ip, syntheticVersion(ip))
+		for _, mod := range sortedKeys(vendored) {
+			fmt.Fprintf(&b, "\t%s %s\n", mod, syntheticVersion(mod))
 		}
 		b.WriteString(")\n")
 	}
@@ -181,12 +212,14 @@ func allDigits(s string) bool {
 	return s != ""
 }
 
-func (st *staged) writeModulesTxt(m *Manifest, vendored []string) error {
+func (st *staged) writeModulesTxt(m *Manifest, vendored map[string][]string) error {
 	var b strings.Builder
-	for _, ip := range vendored {
-		fmt.Fprintf(&b, "# %s %s\n", ip, syntheticVersion(ip))
+	for _, mod := range sortedKeys(vendored) {
+		fmt.Fprintf(&b, "# %s %s\n", mod, syntheticVersion(mod))
 		fmt.Fprintf(&b, "## explicit; go %s\n", m.GoVersion)
-		fmt.Fprintf(&b, "%s\n", ip)
+		for _, pkg := range vendored[mod] {
+			fmt.Fprintf(&b, "%s\n", pkg)
+		}
 	}
 	path := filepath.Join(st.Root, "vendor", "modules.txt")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

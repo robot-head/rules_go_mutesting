@@ -107,6 +107,64 @@ func TestStageModuleLayout(t *testing.T) {
 	}
 }
 
+func TestStageModuleGroupsIllegalMajorSuffixes(t *testing.T) {
+	// A module path may not end in /v0 or /v1, but packages do live in
+	// directories named that way. They have to be attributed to their parent
+	// or the go command rejects the generated go.mod outright.
+	in := t.TempDir()
+	dep := func(ip, file string) Dep {
+		return Dep{
+			ImportPath: ip,
+			Srcs:       []Source{{Path: writeSource(t, in, file, "package p\n"), Name: file}},
+		}
+	}
+	m := &Manifest{
+		ImportPath: "example.com/app",
+		GoVersion:  "1.26",
+		Srcs:       []Source{{Path: writeSource(t, in, "app.go", "package app\n"), Name: "app.go"}},
+		Deps: []Dep{
+			dep("go.opentelemetry.io/proto/otlp/common/v1", "common.go"),
+			dep("go.opentelemetry.io/proto/otlp/trace/v1", "trace.go"),
+			// Not a major version suffix at all, and just as invalid.
+			dep("go.opentelemetry.io/otel/semconv/v1.27.0", "semconv27.go"),
+			dep("go.opentelemetry.io/otel/semconv/v1.30.0", "semconv30.go"),
+			// A legal suffix: stays its own module.
+			dep("github.com/foo/bar/v2", "bar.go"),
+		},
+	}
+	root := filepath.Join(t.TempDir(), "module")
+	if _, err := stageModule(m, root); err != nil {
+		t.Fatal(err)
+	}
+
+	gomod := readFile(t, filepath.Join(root, "go.mod"))
+	for _, unwanted := range []string{"common/v1", "trace/v1", "semconv/v1.27.0", "semconv/v1.30.0"} {
+		if strings.Contains(gomod, unwanted) {
+			t.Errorf("go.mod requires %s, which is not a legal module path:\n%s", unwanted, gomod)
+		}
+	}
+	if !strings.Contains(gomod, "github.com/foo/bar/v2 v2.0.0") {
+		t.Errorf("go.mod dropped a legal major version suffix:\n%s", gomod)
+	}
+
+	// Every package still has to be listed, under whichever module now owns
+	// it, and the files still belong at their full import path.
+	modules := readFile(t, filepath.Join(root, "vendor/modules.txt"))
+	want := "# github.com/foo/bar/v2 v2.0.0\n## explicit; go 1.26\ngithub.com/foo/bar/v2\n" +
+		"# go.opentelemetry.io/otel/semconv v0.0.0\n## explicit; go 1.26\n" +
+		"go.opentelemetry.io/otel/semconv/v1.27.0\ngo.opentelemetry.io/otel/semconv/v1.30.0\n" +
+		"# go.opentelemetry.io/proto/otlp/common v0.0.0\n## explicit; go 1.26\n" +
+		"go.opentelemetry.io/proto/otlp/common/v1\n" +
+		"# go.opentelemetry.io/proto/otlp/trace v0.0.0\n## explicit; go 1.26\n" +
+		"go.opentelemetry.io/proto/otlp/trace/v1\n"
+	if modules != want {
+		t.Errorf("modules.txt = %q, want %q", modules, want)
+	}
+	if _, err := os.Stat(filepath.Join(root, "vendor/go.opentelemetry.io/proto/otlp/common/v1/common.go")); err != nil {
+		t.Errorf("the package is not staged at its import path: %v", err)
+	}
+}
+
 func TestStageModuleWithoutDeps(t *testing.T) {
 	in := t.TempDir()
 	m := &Manifest{
