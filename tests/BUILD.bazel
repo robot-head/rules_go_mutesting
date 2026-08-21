@@ -1,0 +1,23 @@
+load("//mutesting:defs.bzl", "go_mutesting_test")
+
+# The adder package has deliberately weak tests, so its score is low and the
+# threshold here is set below it rather than at a level worth copying.
+go_mutesting_test(
+    name = "adder_mutation_test",
+    min_msi = "50",
+    target = "//examples/adder:adder_test",
+)
+
+# calc's tests are thorough, so it can hold a higher bar.
+go_mutesting_test(
+    name = "calc_mutation_test",
+    min_msi = "75",
+    target = "//examples/calc:calc_test",
+)
+
+# Reporting without a gate, for a target whose score is not yet where it
+# should be.
+go_mutesting_test(
+    name = "adder_report_only_test",
+    target = "//examples/adder:adder",
+)

@@ -1,0 +1,123 @@
+load(
+    "@bazel_skylib//rules:common_settings.bzl",
+    "bool_flag",
+    "int_flag",
+    "repeatable_string_flag",
+    "string_flag",
+)
+load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
+load(
+    "//mutesting:settings.bzl",
+    "BOOL_SETTINGS",
+    "INT_SETTINGS",
+    "LABEL_SETTINGS",
+    "STRING_LIST_SETTINGS",
+    "STRING_SETTINGS",
+)
+
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    "aspect.bzl",
+    "defs.bzl",
+    "settings.bzl",
+])
+
+# --- Option surface -----------------------------------------------------------
+# Every go-mutesting option is a build setting, so any of them can be set on the
+# command line, e.g.
+#   bazel build //... --config=mutesting \
+#     --@rules_go_mutesting//mutesting:disable=arithmetic/*
+
+[
+    bool_flag(
+        name = name,
+        build_setting_default = default,
+    )
+    for name, default, _doc in BOOL_SETTINGS
+]
+
+[
+    string_flag(
+        name = name,
+        build_setting_default = default,
+    )
+    for name, default, _doc in STRING_SETTINGS
+]
+
+[
+    int_flag(
+        name = name,
+        build_setting_default = default,
+    )
+    for name, default, _doc in INT_SETTINGS
+]
+
+[
+    repeatable_string_flag(
+        name = name,
+        build_setting_default = [],
+    )
+    for name, _doc in STRING_LIST_SETTINGS
+]
+
+[
+    label_flag(
+        name = name,
+        build_setting_default = sentinel,
+    )
+    for name, sentinel, _doc in LABEL_SETTINGS
+]
+
+# Sentinels: an empty file means "option not set". The runner treats a
+# zero-length input as absent, which keeps the aspect free of conditional
+# action inputs.
+exports_files([
+    "empty_config.yaml",
+    "empty_exclusions.txt",
+    "empty_exec_script.sh",
+    "empty_baseline.json",
+])
+
+filegroup(
+    name = "empty_config",
+    srcs = ["empty_config.yaml"],
+)
+
+filegroup(
+    name = "empty_exclusions",
+    srcs = ["empty_exclusions.txt"],
+)
+
+filegroup(
+    name = "empty_exec_script",
+    srcs = ["empty_exec_script.sh"],
+)
+
+filegroup(
+    name = "empty_baseline",
+    srcs = ["empty_baseline.json"],
+)
+
+# --- Tools --------------------------------------------------------------------
+
+# The mutation engine itself, for introspection commands that make no sense as
+# a build action:  bazel run @rules_go_mutesting//mutesting:tool -- --list-mutators
+alias(
+    name = "tool",
+    actual = "@com_github_jonbaldie_go_mutesting_v2//cmd/go-mutesting",
+)
+
+# Mutation testing restricted to lines changed since an explicit git base ref.
+sh_binary(
+    name = "changed",
+    srcs = ["changed.sh"],
+    data = [":tool"],
+)
+
+# Rewrites a baseline file in the source tree; deliberately not a build action.
+sh_binary(
+    name = "update_baseline",
+    srcs = ["update_baseline.sh"],
+    data = [":tool"],
+)

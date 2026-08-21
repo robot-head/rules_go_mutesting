@@ -1,0 +1,7 @@
+bazel-*
+.ijwb/
+.claude/
+
+# The consumer test module's dependencies are overridden by whatever is being
+# tested, so its lockfile is a build artifact rather than a checked-in pin.
+e2e/bcr_test/MODULE.bazel.lock

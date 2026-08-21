@@ -1,0 +1,15 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "adder",
+    srcs = ["adder.go"],
+    importpath = "rules_go_mutesting/examples/adder",
+)
+
+go_test(
+    name = "adder_test",
+    srcs = ["adder_test.go"],
+    embed = [":adder"],
+)

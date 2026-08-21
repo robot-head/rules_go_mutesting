@@ -1,0 +1,8 @@
+common --enable_platform_specific_config
+
+# Convenience config: `bazel build //... --config=mutesting` runs the aspect
+# over every Go target and materializes the per-target reports.
+build:mutesting --aspects=@rules_go_mutesting//mutesting:aspect.bzl%go_mutesting_aspect
+build:mutesting --output_groups=+mutesting_report
+
+test --test_output=errors

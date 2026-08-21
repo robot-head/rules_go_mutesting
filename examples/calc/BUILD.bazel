@@ -1,0 +1,16 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "calc",
+    srcs = ["calc.go"],
+    importpath = "rules_go_mutesting/examples/calc",
+    deps = ["//examples/adder"],
+)
+
+go_test(
+    name = "calc_test",
+    srcs = ["calc_test.go"],
+    embed = [":calc"],
+)

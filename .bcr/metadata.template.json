@@ -1,0 +1,15 @@
+{
+    "homepage": "https://github.com/{OWNER}/{REPO}",
+    "maintainers": [
+        {
+            "name": "Matthew Stone",
+            "email": "matthew.d.stone@gmail.com",
+            "github": "REPLACE_WITH_GITHUB_USERNAME"
+        }
+    ],
+    "repository": [
+        "github:{OWNER}/{REPO}"
+    ],
+    "versions": [],
+    "yanked_versions": {}
+}

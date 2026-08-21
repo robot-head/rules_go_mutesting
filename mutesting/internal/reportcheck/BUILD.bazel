@@ -1,0 +1,14 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "reportcheck_lib",
+    srcs = ["main.go"],
+    importpath = "rules_go_mutesting/mutesting/internal/reportcheck",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "reportcheck",
+    embed = [":reportcheck_lib"],
+    visibility = ["//visibility:public"],
+)

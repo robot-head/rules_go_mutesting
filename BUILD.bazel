@@ -1,0 +1,9 @@
+load("@gazelle//:def.bzl", "gazelle")
+
+# gazelle:prefix rules_go_mutesting
+gazelle(name = "gazelle")
+
+exports_files([
+    "go.mod",
+    "go.sum",
+])

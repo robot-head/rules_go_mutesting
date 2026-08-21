@@ -1,0 +1,22 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_go_mutesting//mutesting:defs.bzl", "go_mutesting_test")
+
+go_library(
+    name = "greeter",
+    srcs = ["greeter.go"],
+    importpath = "example.com/bcr_test/greeter",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "greeter_test",
+    srcs = ["greeter_test.go"],
+    embed = [":greeter"],
+)
+
+# The consumer-facing check: mutation testing runs and the score clears a gate.
+go_mutesting_test(
+    name = "greeter_mutation_test",
+    min_msi = "70",
+    target = ":greeter_test",
+)

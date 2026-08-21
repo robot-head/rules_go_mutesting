@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: bazel-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'go.sum') }}
+          restore-keys: bazel-${{ runner.os }}-
+      - name: Unit tests and example gates
+        run: bazel test //...
+      - name: Mutation-test this repository
+        run: bazel build //... --config=mutesting
+
+  consumer:
+    name: Consuming module
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache Bazel
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bazel
+          key: bazel-consumer-${{ runner.os }}-${{ hashFiles('MODULE.bazel', 'go.sum') }}
+          restore-keys: bazel-consumer-${{ runner.os }}-
+      # The same module the Bazel Central Registry runs as a presubmit, so a
+      # break in the consumer-facing API shows up here first.
+      - name: Test the e2e module against this checkout
+        working-directory: e2e/bcr_test
+        run: bazel test //... --override_module=rules_go_mutesting=../..
+
+  changed_lines:
+    name: Changed-lines mode
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The diff base has to be present, so fetch the full history.
+          fetch-depth: 0
+      - name: Mutation-test only the changed lines
+        run: |
+          bazel run //mutesting:changed -- \
+            --base "origin/${{ github.base_ref }}"

@@ -1,0 +1,22 @@
+"""A minimal consumer of rules_go_mutesting.
+
+This module exists to prove that mutation testing works for someone who only
+declares the bazel_dep below, with no other setup. The Bazel Central Registry
+runs it as the presubmit test module, overriding the dependency with the
+version being published.
+
+To run it against the checkout instead of a released version:
+
+    bazel --override_module=rules_go_mutesting=../.. test //...
+"""
+
+module(
+    name = "rules_go_mutesting_e2e",
+    version = "0.0.0",
+)
+
+bazel_dep(name = "rules_go", version = "0.63.0")
+bazel_dep(name = "rules_go_mutesting", version = "0.1.0")
+
+go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
+go_sdk.download(version = "1.26.5")
