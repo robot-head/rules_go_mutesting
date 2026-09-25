@@ -21,3 +21,12 @@ go_mutesting_test(
     name = "adder_report_only_test",
     target = "//examples/adder",
 )
+
+# greeting's test embeds its own golden file. Without it staged the suite does
+# not compile; the noop check in .bazelrc turns that into a failure rather
+# than a perfect score.
+go_mutesting_test(
+    name = "greeting_mutation_test",
+    min_msi = "50",
+    target = "//examples/greeting:greeting_test",
+)
