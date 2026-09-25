@@ -6,3 +6,8 @@ build:mutesting --aspects=@rules_go_mutesting//mutesting:aspect.bzl%go_mutesting
 build:mutesting --output_groups=+mutesting_report
 
 test --test_output=errors
+
+# Run each suite once unmutated before mutating it. A suite that does not
+# compile inside the mutation sandbox would otherwise score every mutant as
+# killed, and the go_mutesting_test targets below //tests would pass.
+common --@rules_go_mutesting//mutesting:noop=true

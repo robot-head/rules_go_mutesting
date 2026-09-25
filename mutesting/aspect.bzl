@@ -175,7 +175,11 @@ def _package_sources(target, ctx, kind):
         # A go_test carries the test sources; the package under test comes
         # from the libraries it embeds.
         srcs = list(_staged_files(ctx.rule.files.srcs))
-        embedsrcs = []
+
+        # The test's own //go:embed files, alongside those of the libraries
+        # it embeds. Without them a test with its own golden files does not
+        # compile, and every mutant counts as killed.
+        embedsrcs = list(getattr(ctx.rule.files, "embedsrcs", []))
         importpath = getattr(ctx.rule.attr, "importpath", "")
         dep_archives = []
         for e in getattr(ctx.rule.attr, "embed", []):
