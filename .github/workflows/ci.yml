@@ -10,7 +10,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache Bazel
         uses: actions/cache@v4
         with:
@@ -26,7 +26,7 @@ jobs:
     name: Consuming module
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Cache Bazel
         uses: actions/cache@v4
         with:
@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The diff base has to be present, so fetch the full history.
           fetch-depth: 0
